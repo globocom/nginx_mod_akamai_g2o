@@ -26,6 +26,7 @@ task :setup_nginx do
   make_content_dir 'allow_token1'
   make_content_dir 'allow_all'
   make_content_dir 'using_vars'
+  make_content_dir 'using_vars_for_headers'
 end
 
 def make_content_dir(dir)

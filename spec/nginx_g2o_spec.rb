@@ -43,49 +43,49 @@ describe 'nginx mod' do
     it 'should allow access to content with correct G2O headers' do
       data = g2o_data_header
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPOK)
     end
 
     it 'should disallow access to content with time more than 30 seconds into the future' do
       data = g2o_data_header(:time => Time.now + 31)
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPForbidden)
     end
 
     it 'should allow access to content with time less than 30 seconds into the future' do
       data = g2o_data_header(:time => Time.now + 29)
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPOK)
     end
 
     it 'should disallow access to content with time more than 30 seconds into the past' do
       data = g2o_data_header(:time => Time.now - 31)
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPForbidden)
     end
 
     it 'should allow access to content with time less than 30 seconds into the past' do
       data = g2o_data_header(:time => Time.now - 29)
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPOK)
     end
-    
+
     it 'should disallow access to content with wrong signature' do
       data = g2o_data_header
       sign = "wrong sig"
-      
+
       get(data, sign).should respond_with(Net::HTTPForbidden)
     end
 
     it 'should disallow access to content if using wrong token' do
       data = g2o_data_header(:token => "wrong_token")
       sign = sign_data(data)
-      
+
       get(data, sign).should respond_with(Net::HTTPForbidden)
     end
 
@@ -100,7 +100,7 @@ describe 'nginx mod' do
       sign = sign_data(data)
       get(data, sign).should respond_with(Net::HTTPForbidden)
     end
-    
+
     context "with path that accepts token1 token" do
       before do
         @uri = URI.parse('http://localhost:8080/allow_token1/stuff.html')
@@ -158,6 +158,28 @@ describe 'nginx mod' do
       end
     end
 
+    context "using variables to set the data header into the conf" do
+      before do
+        @uri = URI.parse('http://localhost:8080/using_vars_for_headers/stuff.html')
+      end
+
+      it 'should allow access to content with correct G2O headers' do
+        data = g2o_data_header
+        sign = sign_data(data)
+        options = { data_header: 'X-Custom-G2O-Auth-Data', sign_header: 'X-Custom-G2O-Auth-Sign' }
+
+        get(data, sign, options).should respond_with(Net::HTTPOK)
+      end
+
+      it 'should disallow access to content if using wrong header' do
+        data = g2o_data_header
+        sign = sign_data(data)
+        options = { data_header: 'X-WRONG-G2O-Auth-Data', sign_header: 'X-WRONG-G2O-Auth-Sign' }
+
+        get(data, sign, options).should respond_with(Net::HTTPForbidden)
+      end
+    end
+
     it 'should disallow access to content without G2O headers' do
       get.should respond_with(Net::HTTPForbidden)
     end
@@ -165,14 +187,16 @@ describe 'nginx mod' do
     def get(data = nil, sign = nil, options = {})
       Net::HTTP.start(@uri.host, @uri.port) do |http|
         headers = {}
+        data_header = options[:data_header] || "X-AKAMAI-G2O-Auth-Data"
+        sign_header = options[:sign_header] || "X-AKAMAI-G2O-Auth-Sign"
 
-        headers["X-Akamai-G2O-Auth-Data"] = data if data
-        headers["X-Akamai-G2O-Auth-Sign"] = sign if sign
+        headers[data_header] = data if data
+        headers[sign_header] = sign if sign
 
         http.get(@uri.path, headers)
       end
     end
-    
+
     def sign_data(data, options = {})
       key = (options[:key] or 'a_password')
       digest = OpenSSL::HMAC.digest('md5', key, data + @uri.path)

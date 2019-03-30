@@ -23,8 +23,8 @@ typedef struct {
     ngx_int_t mode;
     ngx_http_complex_value_t* nonce;
     ngx_http_complex_value_t* key;
-    ngx_str_t data_header;
-    ngx_str_t sign_header;
+    ngx_http_complex_value_t* data_header;
+    ngx_http_complex_value_t* sign_header;
     const EVP_MD* (*hash_function)(void);
     ngx_uint_t version;
     time_t time_window;
@@ -69,14 +69,14 @@ static ngx_command_t  ngx_http_akamai_g2o_commands[] = {
 
     { ngx_string("g2o_data_header"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-      ngx_conf_set_str_slot,
+      ngx_http_set_complex_value_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_akamai_g2o_loc_conf_t, data_header),
       NULL },
 
     { ngx_string("g2o_sign_header"),
       NGX_HTTP_MAIN_CONF | NGX_HTTP_SRV_CONF | NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
-      ngx_conf_set_str_slot,
+      ngx_http_set_complex_value_slot,
       NGX_HTTP_LOC_CONF_OFFSET,
       offsetof(ngx_http_akamai_g2o_loc_conf_t, sign_header),
       NULL },
@@ -218,10 +218,33 @@ get_data_and_sign_from_request_headers(ngx_http_request_t *r, ngx_str_t *header_
     ngx_list_part_t *part = &headers.part;
     ngx_table_elt_t* data = part->elts;
     ngx_table_elt_t header;
-
-    unsigned int i;
+    ngx_str_t data_header_str = ngx_null_string, sign_header_str = ngx_null_string;
 
     alcf = ngx_http_get_module_loc_conf(r, ngx_http_akamai_g2o_module);
+
+    if (alcf->data_header == NULL) {
+        ngx_str_set(&data_header_str, "X-Akamai-G2O-Auth-Data");
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "g2o_data_header was not set. using default %V", &data_header_str);
+    }
+    else {
+        if (ngx_http_complex_value(r, alcf->data_header, &data_header_str) != NGX_OK) {
+            ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o_data_header error");
+            return;
+        }
+    }
+
+    if (alcf->sign_header == NULL) {
+        ngx_str_set(&sign_header_str, "X-Akamai-G2O-Auth-Sign");
+        ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "g2o_sign_header was not set. using default %V", &sign_header_str);
+    }
+    else {
+        if (ngx_http_complex_value(r, alcf->sign_header, &sign_header_str) != NGX_OK) {
+            ngx_log_error(alcf->log_level, r->connection->log, 0, "g2o_sign_header error");
+            return;
+        }
+    }
+
+    unsigned int i;
 
     for (i = 0 ;; i++) {
 
@@ -238,12 +261,13 @@ get_data_and_sign_from_request_headers(ngx_http_request_t *r, ngx_str_t *header_
         header = data[i];
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "%s: %s", header.key.data, header.value.data);
 
-        if (ngx_strcasecmp(alcf->data_header.data, header.key.data) == 0) {
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found %V", &alcf->data_header);
+        if (ngx_strncasecmp(data_header_str.data, header.key.data, data_header_str.len) == 0) {
+            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found %V", &data_header_str);
             *header_data = header.value;
         }
-        if (ngx_strcasecmp(alcf->sign_header.data, header.key.data) == 0) {
-            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found %V", &alcf->sign_header);
+
+        if (ngx_strncasecmp(sign_header_str.data, header.key.data, sign_header_str.len) == 0) {
+            ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0, "found %V", &sign_header_str);
             *header_sign = header.value;
         }
     }
@@ -532,8 +556,14 @@ ngx_http_akamai_g2o_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
     {
         conf->nonce = prev->nonce;
     }
-    ngx_conf_merge_str_value(conf->data_header, prev->data_header, "X-Akamai-G2O-Auth-Data");
-    ngx_conf_merge_str_value(conf->sign_header, prev->sign_header, "X-Akamai-G2O-Auth-Sign");
+    if (conf->data_header == NULL)
+    {
+        conf->data_header = prev->data_header;
+    }
+    if (conf->sign_header == NULL)
+    {
+        conf->sign_header = prev->sign_header;
+    }
     ngx_conf_merge_ptr_value(conf->hash_function, prev->hash_function, EVP_md5);
     ngx_conf_merge_uint_value(conf->version, prev->version, 3);
     ngx_conf_merge_value(conf->time_window, prev->time_window, 30);
